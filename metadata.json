@@ -1,0 +1,8 @@
+{
+  "name": "Jerusaremu Digital Network 3.0",
+  "description": "An offline-first church management PWA featuring hierarchical data isolation, code-gated access, and seamless synchronization across seven organizational levels.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

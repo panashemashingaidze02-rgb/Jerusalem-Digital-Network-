@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "fullName": { "type": "string" },
+        "role": { "type": "string" }
+      },
+      "required": ["id", "email", "fullName"]
+    },
+    "BibleBookmark": {
+      "title": "BibleBookmark",
+      "description": "User bookmarks in the Bible with optional note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "book": { "type": "string" },
+        "chapter": { "type": "integer" },
+        "verse": { "type": "integer" },
+        "text": { "type": "string" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "book", "chapter", "verse", "text", "createdAt"]
+    },
+    "BibleFavorite": {
+      "title": "BibleFavorite",
+      "description": "User favorite verses in the Bible",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "book": { "type": "string" },
+        "chapter": { "type": "integer" },
+        "verse": { "type": "integer" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "book", "chapter", "verse", "text", "createdAt"]
+    },
+    "BibleHighlight": {
+      "title": "BibleHighlight",
+      "description": "User customized highlights on bible verses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "book": { "type": "string" },
+        "chapter": { "type": "integer" },
+        "verse": { "type": "integer" },
+        "text": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "book", "chapter", "verse", "text", "color", "createdAt"]
+    },
+    "BibleProgress": {
+      "title": "BibleProgress",
+      "description": "Track reading progress of full chapters and plans",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "completedChapters": { "type": "array" },
+        "activePlanId": { "type": "string" },
+        "planProgress": { "type": "integer" },
+        "lastReadAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "completedChapters"]
+    }
+  },
+  "firestore": {
+    "/user_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles"
+    },
+    "/users/{userId}/bible_bookmarks/{bookmarkId}": {
+      "schema": { "$ref": "#/entities/BibleBookmark" },
+      "description": "User Bible Bookmarks"
+    },
+    "/users/{userId}/bible_favorites/{favoriteId}": {
+      "schema": { "$ref": "#/entities/BibleFavorite" },
+      "description": "User Bible Favorites"
+    },
+    "/users/{userId}/bible_highlights/{highlightId}": {
+      "schema": { "$ref": "#/entities/BibleHighlight" },
+      "description": "User Bible Highlights"
+    },
+    "/users/{userId}/bible_progress/{progressId}": {
+      "schema": { "$ref": "#/entities/BibleProgress" },
+      "description": "User Bible Reading Progress"
+    }
+  }
+}

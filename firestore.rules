@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['id', 'email', 'fullName']) && data.keys().size() >= 3
+        && data.id is string
+        && data.email is string
+        && data.fullName is string
+        && data.id == request.auth.uid;
+    }
+
+    function isValidBookmark(data) {
+      return data.keys().hasAll(['id', 'userId', 'book', 'chapter', 'verse', 'text', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.book is string && data.book.size() <= 128
+        && data.chapter is int
+        && data.verse is int
+        && data.text is string && data.text.size() <= 2000;
+    }
+
+    function isValidFavorite(data) {
+      return data.keys().hasAll(['id', 'userId', 'book', 'chapter', 'verse', 'text', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.book is string && data.book.size() <= 128
+        && data.chapter is int
+        && data.verse is int
+        && data.text is string && data.text.size() <= 2000;
+    }
+
+    function isValidHighlight(data) {
+      return data.keys().hasAll(['id', 'userId', 'book', 'chapter', 'verse', 'text', 'color', 'createdAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.book is string && data.book.size() <= 128
+        && data.chapter is int
+        && data.verse is int
+        && data.text is string && data.text.size() <= 2000
+        && data.color is string && data.color.size() <= 32;
+    }
+
+    function isValidProgress(data) {
+      return data.keys().hasAll(['id', 'userId', 'completedChapters'])
+        && data.id is string && data.id.size() <= 128
+        && data.userId is string && data.userId == request.auth.uid
+        && data.completedChapters is list;
+    }
+
+    match /user_profiles/{userId} {
+      allow read, write: if isSignedIn() && isValidId(userId);
+    }
+
+    match /members/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /contributions/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /attendance_sessions/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /attendance_records/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /ungano_categories/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /ungano_payments/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /level_codes/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /platform_logs/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /updates/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /dare_minutes/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /prayer_requests/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /settings/{id} {
+      allow read, write: if isSignedIn() && isValidId(id);
+    }
+
+    match /users/{userId}/bible_bookmarks/{bookmarkId} {
+      allow get, list: if isSignedIn() && userId == request.auth.uid;
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(bookmarkId) && isValidBookmark(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(bookmarkId);
+    }
+
+    match /users/{userId}/bible_favorites/{favoriteId} {
+      allow get, list: if isSignedIn() && userId == request.auth.uid;
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(favoriteId) && isValidFavorite(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(favoriteId);
+    }
+
+    match /users/{userId}/bible_highlights/{highlightId} {
+      allow get, list: if isSignedIn() && userId == request.auth.uid;
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(highlightId) && isValidHighlight(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(highlightId);
+    }
+
+    match /users/{userId}/bible_progress/{progressId} {
+      allow get, list: if isSignedIn() && userId == request.auth.uid;
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidId(progressId) && isValidProgress(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid && isValidId(progressId);
+    }
+  }
+}
