@@ -479,10 +479,11 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
         return;
       }
 
-      // 2. Handle Shona local collections as fallback
-      if (activeVersion === 'shona_kjv') {
-        if (SHONA_COLLECTION[fallbackKey]) {
-          const list = SHONA_COLLECTION[fallbackKey].map((v: any) => ({
+      // 2. Handle Shona/Ndebele local collections as fallback
+      if (activeVersion === 'shona_kjv' || activeVersion === 'ndebele_kjv') {
+        const collection = activeVersion === 'shona_kjv' ? SHONA_COLLECTION : NDEBELE_COLLECTION;
+        if (collection[fallbackKey]) {
+          const list = collection[fallbackKey].map((v: any) => ({
             verse: v.verse,
             text: v.text,
             translatedText: v.text
@@ -497,7 +498,7 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
       // 4. Fetch English translations from bible-api.com
       if (navigator.onLine) {
         const formatedBook = encodeURIComponent(book.toLowerCase());
-        const apiTranslation = (activeVersion === 'shona_kjv') ? 'kjv' : activeVersion;
+        const apiTranslation = (activeVersion === 'shona_kjv' || activeVersion === 'ndebele_kjv') ? 'kjv' : activeVersion;
         const response = await fetch(`https://bible-api.com/${formatedBook}+${chapter}?translation=${apiTranslation}`);
         
         if (response.ok) {
@@ -508,14 +509,14 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
               text: v.text.trim()
             }));
 
-            // Dynamically translate verses to natural, grammatically correct Shona via server-side Gemini
-            if (activeVersion === 'shona_kjv') {
+            // Dynamically translate verses to natural, grammatically correct Shona/Ndebele via server-side Gemini
+            if (activeVersion === 'shona_kjv' || activeVersion === 'ndebele_kjv') {
               try {
                 const transRes = await fetch('/api/bible/translate', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    language: 'shona_kjv',
+                    language: activeVersion,
                     verses: formattedList.map((fv: any) => ({ verse: fv.verse, text: fv.text }))
                   })
                 });
@@ -560,18 +561,19 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
     }
 
     // 5. Offline backup chapter
-    if (activeVersion === 'shona_kjv' && SHONA_COLLECTION[fallbackKey]) {
-      const list = SHONA_COLLECTION[fallbackKey].map((v: any) => ({
+    const currentCollection = activeVersion === 'shona_kjv' ? SHONA_COLLECTION : (activeVersion === 'ndebele_kjv' ? NDEBELE_COLLECTION : null);
+    if (currentCollection && currentCollection[fallbackKey]) {
+      const list = currentCollection[fallbackKey].map((v: any) => ({
         verse: v.verse,
         text: v.text,
         translatedText: v.text
       }));
       setVersesList(list);
-      toast('KJV Shona Bible (Offline)', { icon: '📴' });
+      toast(`KJV ${activeVersion === 'shona_kjv' ? 'Shona' : 'Ndebele'} Bible (Offline)`, { icon: '📴' });
     } else if (OFFLINE_COLLECTION[fallbackKey]) {
       const basicEnglish = OFFLINE_COLLECTION[fallbackKey];
       let mapped = basicEnglish;
-      if (activeVersion === 'shona_kjv') {
+      if (activeVersion === 'shona_kjv' || activeVersion === 'ndebele_kjv') {
         mapped = basicEnglish.map(v => ({
           verse: v.verse,
           text: v.text,
@@ -712,7 +714,7 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
               book_name: bookName.replace(/_/g, ' '),
               chapter: parseInt(chapNum),
               verse: v.verse,
-              text: (activeVersion === 'shona_kjv') ? (v.translatedText || v.text) : v.text
+              text: (activeVersion === 'shona_kjv' || activeVersion === 'ndebele_kjv') ? (v.translatedText || v.text) : v.text
             });
           }
         }
@@ -1198,6 +1200,7 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
                 <option value="kjv">English (KJV)</option>
                 <option value="bbe">English (BBE)</option>
                 <option value="shona_kjv">KJV Shona Bible (Shona)</option>
+                <option value="ndebele_kjv">KJV Ndebele Bible (Ndebele)</option>
               </select>
             </div>
 
@@ -1306,7 +1309,7 @@ export function BibleModule({ currentUser }: { currentUser: UserProfile }) {
                           <sup className="text-[10px] font-sans font-black select-none text-[#166534] mt-1 shrink-0">{verseObj.verse}</sup>
                           <div className="space-y-1 w-full">
                             <p className="leading-relaxed text-sm sm:text-base">
-                              {(activeVersion === 'shona_kjv') 
+                              {(activeVersion === 'shona_kjv' || activeVersion === 'ndebele_kjv') 
                                 ? (verseObj.translatedText || verseObj.text)
                                 : verseObj.text}
                             </p>

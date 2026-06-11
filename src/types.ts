@@ -167,6 +167,7 @@ export interface SyncQueueItem {
   createdAt: string;
   attempts: number;
   lastError?: string;
+  errorCode?: string;
   failed?: boolean;
 }
 

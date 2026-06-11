@@ -517,7 +517,10 @@ export async function processSyncQueue(): Promise<void> {
       const firestoreCol = firestoreCollections[item.entityType];
       if (firestoreCol) {
         const { doc, setDoc } = await import('firebase/firestore');
-        const { db } = await import('./firebase');
+        const { db, auth } = await import('./firebase');
+
+        if (!auth.currentUser) throw new Error('Not authenticated');
+
         const payloadData = item.payload && item.payload.profile ? item.payload.profile : item.payload;
         await setDoc(doc(db, firestoreCol, item.entityId), payloadData, { merge: true });
       }
@@ -528,6 +531,7 @@ export async function processSyncQueue(): Promise<void> {
     } catch (err: any) {
       console.error(`Local sync retry failed: ${err.message}`);
       item.lastError = err.message;
+      item.errorCode = err.code || 'unknown_error';
       if (item.attempts >= maxAttempts) {
         item.failed = true;
       }
@@ -539,6 +543,119 @@ export async function processSyncQueue(): Promise<void> {
   await saveSyncQueue(updatedQueue);
   isSyncing = false;
   window.dispatchEvent(new Event('jdn_sync_ended'));
+}
+
+export async function retrySyncItem(queueId: string): Promise<void> {
+  const queue = await getSyncQueue();
+  const updatedQueue = queue.map(item => {
+    if (item.queueId === queueId) {
+      return { ...item, failed: false, attempts: 0, lastError: undefined };
+    }
+    return item;
+  });
+  await saveSyncQueue(updatedQueue);
+  await processSyncQueue(); // Attempt immediately
+}
+
+export async function cancelSyncItem(queueId: string): Promise<void> {
+  const queue = await getSyncQueue();
+  const updatedQueue = queue.filter(item => item.queueId !== queueId);
+  await saveSyncQueue(updatedQueue);
+}
+
+let globalListenersSetup = false;
+export async function setupGlobalFirestoreListeners(): Promise<void> {
+  if (globalListenersSetup) return;
+  
+  try {
+    const { collection, onSnapshot, query, limit } = await import('firebase/firestore');
+    const { db, auth } = await import('./firebase');
+    
+    if (!auth.currentUser) return;
+    
+    const collectionsToListen = ['members', 'user_profiles', 'contributions', 'attendance_sessions', 'attendance_records'];
+    
+    collectionsToListen.forEach(colName => {
+      const q = query(collection(db, colName));
+      onSnapshot(q, (snapshot) => {
+        // Trigger a sync down whenever data changes in these collections from the server
+        if (!snapshot.metadata.hasPendingWrites) {
+             syncDownFromFirestore();
+        }
+      }, (error) => {
+        console.error(`Error listening to ${colName}:`, error);
+      });
+    });
+    
+    globalListenersSetup = true;
+    console.log("Global Firestore listeners attached.");
+  } catch(err) {
+    console.error("Failed to setup global listeners:", err);
+  }
+}
+
+export async function syncDownFromFirestore(): Promise<void> {
+  try {
+    const { collection, getDocs } = await import('firebase/firestore');
+    const { db } = await import('./firebase');
+    
+    const memSnap = await getDocs(collection(db, 'members'));
+    await saveMembers(memSnap.docs.map(d => d.data() as Member));
+
+    const profSnap = await getDocs(collection(db, 'user_profiles'));
+    await saveUserProfiles(profSnap.docs.map(d => d.data() as UserProfile));
+
+    const contSnap = await getDocs(collection(db, 'contributions'));
+    await saveContributions(contSnap.docs.map(d => d.data() as ContributionLog));
+
+    const attSSnap = await getDocs(collection(db, 'attendance_sessions'));
+    await saveAttendanceSessions(attSSnap.docs.map(d => d.data() as AttendanceSession));
+
+    const attRSnap = await getDocs(collection(db, 'attendance_records'));
+    await saveAttendanceRecords(attRSnap.docs.map(d => d.data() as AttendanceRecord));
+
+    console.log("Successfully backfilled data from cloud.");
+    window.dispatchEvent(new Event('jdn_db_updated'));
+  } catch (err) {
+    console.error("Failed to sync down cloud data", err);
+  }
+}
+
+export async function forceBackfillToCloud(): Promise<void> {
+  try {
+    const { doc, setDoc } = await import('firebase/firestore');
+    const { db } = await import('./firebase');
+
+    const localMembers = await getMembers();
+    for (const member of localMembers) {
+       await setDoc(doc(db, 'members', member.memberId), member, { merge: true });
+    }
+
+    const localProfiles = await getUserProfiles();
+    for (const profile of localProfiles) {
+       await setDoc(doc(db, 'user_profiles', profile.id), profile, { merge: true });
+    }
+
+    const localContributions = await getContributions();
+    for (const contribution of localContributions) {
+       await setDoc(doc(db, 'contributions', contribution.contributionId), contribution, { merge: true });
+    }
+
+    const localSessions = await getAttendanceSessions();
+    for (const session of localSessions) {
+       await setDoc(doc(db, 'attendance_sessions', session.sessionId), session, { merge: true });
+    }
+
+    const localRecords = await getAttendanceRecords();
+    for (const record of localRecords) {
+       await setDoc(doc(db, 'attendance_records', record.recordId), record, { merge: true });
+    }
+    
+    console.log('Successfully force-synced all local data up to cloud.');
+  } catch (err) {
+    console.error("Failed to force sync local data", err);
+    throw err;
+  }
 }
 
 // User deactivation & Data Reassignment flow

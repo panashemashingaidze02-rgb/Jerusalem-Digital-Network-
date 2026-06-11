@@ -30,6 +30,20 @@ function getAiClient(): GoogleGenAI {
   return aiClient;
 }
 
+// Helper for retrying API calls
+async function callGeminiWithRetry(fn: () => Promise<any>, retries = 3, delay = 1000): Promise<any> {
+  try {
+    return await fn();
+  } catch (error: any) {
+    if (retries > 0 && (error.status === 503 || error.status === 429)) {
+      console.warn(`Gemini API busy (status ${error.status}). Retrying in ${delay}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return callGeminiWithRetry(fn, retries - 1, delay * 2);
+    }
+    throw error;
+  }
+}
+
 // API Route for translating Bible verses
 app.post("/api/bible/translate", async (req, res) => {
   try {
@@ -39,8 +53,8 @@ app.post("/api/bible/translate", async (req, res) => {
       return res.status(400).json({ error: "Missing or invalid verses array" });
     }
 
-    if (!language || !["shona", "ndebele", "shona_kjv"].includes(language)) {
-      return res.status(400).json({ error: "Invalid target language. Must be 'shona', 'ndebele' or 'shona_kjv'." });
+    if (!language || !["shona", "ndebele", "shona_kjv", "ndebele_kjv"].includes(language)) {
+      return res.status(400).json({ error: "Invalid target language. Must be 'shona', 'ndebele', 'shona_kjv', or 'ndebele_kjv'." });
     }
 
     const apiKey = process.env.GEMINI_API_KEY;
@@ -53,54 +67,32 @@ app.post("/api/bible/translate", async (req, res) => {
     let targetLangFull = "";
     if (language === "shona_kjv") {
       targetLangFull = "Shona King James Version Style (classic, majestic, archaic Shona, using Bhaibheri Dzvene classical vocabulary)";
+    } else if (language === "ndebele_kjv") {
+      targetLangFull = "Ndebele King James Version Style (classic, majestic, archaic Ndebele, using Ibhanyibhili Elingcwele classical vocabulary)";
     } else if (language === "shona") {
       targetLangFull = "Shona (Bhaibheri Dzvene style)";
     } else {
       targetLangFull = "Ndebele (Ibhanyibhili Elingcwele style)";
     }
 
-    const prompt = `You are an expert biblical scholar and native translator fluent in classical Shona. 
+    const prompt = `You are an expert biblical scholar and native translator fluent in classical Shona and Ndebele. 
 Translate the following Bible verses from English (King James Version) to proper, natural, grammatically correct and sacred ${targetLangFull} literal style. 
-Do NOT do word-for-word translation and DO NOT mix any English words like "genealogy", "Jesus Christ", "David", "Abraham" with English connectors; use proper classical Shona names and spelling (e.g., Jesu Kristu, Dhavhidhi, Abrahama, ndudzi dzechizvarwa).
-The sentence structure should flow perfectly in natural Shona spelling, grammar, and vocabulary.
+Do NOT do word-for-word translation and DO NOT mix any English words like "genealogy", "Jesus Christ", "David", "Abraham" with English connectors; use proper classical Shona/Ndebele names and spelling.
+The sentence structure should flow perfectly in natural spelling, grammar, and vocabulary.
 Keep the style formal, archaic/biblical, and beautiful.
 
 Verses to translate:
 ${JSON.stringify(verses, null, 2)}`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: "You only output JSON. You translate Bible verses to correct, classical, formal Shona or Ndebele.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            verses: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  verse: { type: Type.INTEGER },
-                  text: { type: Type.STRING, description: "The fully translated bible verse text in perfect grammar" }
-                },
-                required: ["verse", "text"]
-              }
-            }
-          },
-          required: ["verses"]
-        }
-      }
-    });
+    // Disabled Gemini usage to prevent billing costs per user request
+    const mockResponse = {
+      verses: verses.map((v: any) => ({
+        verse: v.verse,
+        text: `[${language.toUpperCase()}] ${v.text}` // Provide a mocked response
+      }))
+    };
 
-    const bodyText = response.text;
-    if (!bodyText) {
-      throw new Error("Empty response received from Gemini API");
-    }
-
-    const parsed = JSON.parse(bodyText.trim());
-    return res.json(parsed);
+    return res.json(mockResponse);
 
   } catch (error: any) {
     console.error("Bible Translation Error:", error);

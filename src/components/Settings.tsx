@@ -19,7 +19,8 @@ import {
   saveCustomLevels,
   getSettings,
   saveSettings,
-  resolveBranchName
+  resolveBranchName,
+  forceBackfillToCloud
 } from '../lib/storage';
 import { KeyRound, ShieldAlert, CheckCircle2, AlertTriangle, Key, Download, Trash, UserPlus, ToggleLeft, ToggleRight, Wifi, WifiOff, RefreshCw, FolderSearch, Users, Activity, Layers, ExternalLink, User, Image as ImageIcon, Coins } from 'lucide-react';
 import { JdnSettings } from '../types';
@@ -126,6 +127,12 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
   const [hierarchyOrder, setHierarchyOrder] = useState<JdnLevel[]>(getStoredHierarchyOrder());
   const [hierarchyNames, setHierarchyNames] = useState<Record<string, string>>(getStoredLevelNames());
   const [editingLevelMap, setEditingLevelMap] = useState<Record<string, string>>({});
+
+  // Custom confirmation states to replace window.prompt/confirm (unsupported in iframe)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [confirmSyncBulk, setConfirmSyncBulk] = useState(false);
+  const [isSyncingBulk, setIsSyncingBulk] = useState(false);
 
   // Helper: which levels can the current user create?
   const allowedChildLevels = hierarchyOrder.filter(lvl => {
@@ -614,8 +621,8 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
 
   const handleExportBackup = async () => {
     try {
-      const { localforage } = window as any;
-      if (!localforage) return;
+      const localforage = (await import('localforage')).default;
+
       const keys = await localforage.keys();
       const targets = getSubordinateTabheraAndUserIds();
       const backup: Record<string, any> = {};
@@ -659,8 +666,7 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
 
   const handleExportExcel = async () => {
     try {
-      const { localforage } = window as any;
-      if (!localforage) return;
+      const localforage = (await import('localforage')).default;
       
       const keys = await localforage.keys();
       const targets = getSubordinateTabheraAndUserIds();
@@ -726,8 +732,7 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
     reader.onload = async (evt) => {
       try {
         const json = JSON.parse(evt.target?.result as string);
-        const { localforage } = window as any;
-        if (!localforage) return;
+        const localforage = (await import('localforage')).default;
         
         const isTargeted = targetChurchFilter !== 'ALL';
         if (!isTargeted) {
@@ -782,16 +787,9 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
 
   const handleResetSystemData = async () => {
     const isTargeted = targetChurchFilter !== 'ALL';
-    const msg = isTargeted 
-      ? `CRITICAL WARNING: This will WIPE ALL DATA for "${targetChurchFilter}". Are you absolutely sure?`
-      : "CRITICAL WARNING: This will WIPE ALL SYSTEM DATA. Are you absolutely sure?";
       
-    if (!window.confirm(msg)) return;
-    const prm = window.prompt(isTargeted ? `Type 'DELETE ${targetChurchFilter.toUpperCase()}' to confirm:` : "Type 'DELETE ALL' to confirm:");
-    
-    if (prm === (isTargeted ? `DELETE ${targetChurchFilter.toUpperCase()}` : 'DELETE ALL')) {
-      const { localforage } = window as any;
-      if (!localforage) return;
+    try {
+      const localforage = (await import('localforage')).default;
       
       if (!isTargeted) {
         await localforage.clear();
@@ -827,6 +825,8 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
         await loadSettingsData();
         toast.success(`Successfully cleared all database records for: ${targetChurchFilter}`);
       }
+    } catch (err: any) {
+      toast.error('Failed to reset system data: ' + err.message);
     }
   };
 
@@ -1828,13 +1828,75 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
                   ? 'WARNING: Permanently deletes all system records.' 
                   : `WARNING: Permanently deletes all rows linked to "${targetChurchFilter}".`}
               </p>
+              {showDeleteConfirm && (
+                <div className="w-full">
+                  <input
+                    type="text"
+                    placeholder={`Type '${targetChurchFilter === 'ALL' ? 'DELETE ALL' : 'DELETE ' + targetChurchFilter.toUpperCase()}'`}
+                    className="w-full p-2 text-xs border border-red-300 rounded mb-2 font-mono uppercase bg-red-100 placeholder:text-red-300 placeholder:normal-case text-red-900"
+                    value={deleteConfirmText}
+                    onChange={e => setDeleteConfirmText(e.target.value.toUpperCase())}
+                  />
+                </div>
+              )}
               <button 
-                onClick={handleResetSystemData}
+                onClick={() => {
+                  if (!showDeleteConfirm) {
+                    setShowDeleteConfirm(true);
+                    return;
+                  }
+                  
+                  const targetStr = targetChurchFilter === 'ALL' ? 'DELETE ALL' : `DELETE ${targetChurchFilter.toUpperCase()}`;
+                  if (deleteConfirmText === targetStr) {
+                    handleResetSystemData();
+                    setShowDeleteConfirm(false);
+                    setDeleteConfirmText('');
+                  } else {
+                    toast.error(`Please type '${targetStr}' exactly to confirm deletion.`);
+                  }
+                }}
                 className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center"
               >
-                {targetChurchFilter === 'ALL' ? 'RESET WHOLE SYSTEM' : `RESET ${targetChurchFilter.toUpperCase()}`}
+                {showDeleteConfirm ? 'CONFIRM AND RESET' : (targetChurchFilter === 'ALL' ? 'RESET WHOLE SYSTEM' : `RESET ${targetChurchFilter.toUpperCase()}`)}
+              </button>
+              {showDeleteConfirm && (
+                  <button onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }} className="w-full bg-red-100 hover:bg-red-200 text-red-800 font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center">
+                    CANCEL
+                  </button>
+              )}
+            </div>
+
+            <div className="bg-blue-50 p-4 border border-blue-200 rounded-lg flex flex-col items-start gap-2">
+              <div className="font-bold text-xs uppercase text-blue-800 font-mono">Force Backfill to Cloud</div>
+              <p className="text-[10px] text-gray-600 flex-1">
+                If some records exist only locally, click this to upload all local records spanning your account scope to Firebase.
+              </p>
+              <button 
+                disabled={isSyncingBulk}
+                onClick={async () => {
+                  if (!confirmSyncBulk) {
+                    setConfirmSyncBulk(true);
+                    setTimeout(() => setConfirmSyncBulk(false), 5000);
+                    return;
+                  }
+                  try {
+                    setIsSyncingBulk(true);
+                    await forceBackfillToCloud();
+                    toast.success("Successfully bulk pushed all data to cloud database.");
+                    setConfirmSyncBulk(false);
+                  } catch (err: any) {
+                     toast.error("Failed to push to cloud. Ensure you have permissions. Error: " + err.message);
+                  } finally {
+                    setIsSyncingBulk(false);
+                  }
+                }}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1"
+              >
+                <Activity className={`h-3.5 w-3.5 ${isSyncingBulk ? 'animate-spin' : ''}`} /> 
+                {isSyncingBulk ? 'Syncing...' : (confirmSyncBulk ? 'Click again to confirm' : 'Bulk Sync to Remote')}
               </button>
             </div>
+
           </div>
         </div>
       )}

@@ -8,6 +8,8 @@ import {
   getSyncQueue,
   saveSyncQueue,
   processSyncQueue,
+  retrySyncItem,
+  cancelSyncItem,
   getNetworkStatus,
   setNetworkStatus,
   initializeNetworkListeners,
@@ -16,7 +18,9 @@ import {
   saveNotifications,
   addNotification,
   getLastSyncTime,
-  getSettings
+  getSettings,
+  syncDownFromFirestore,
+  setupGlobalFirestoreListeners
 } from './lib/storage';
 import { Auth, ForcedPasswordChange } from './components/Auth';
 import Verify from './components/Verify';
@@ -146,6 +150,11 @@ export default function App() {
         try {
           await getDocFromServer(doc(db, 'test', 'connection'));
           console.log("Firebase connection established.");
+          
+          if (user && getNetworkStatus()) {
+             await syncDownFromFirestore();
+             await setupGlobalFirestoreListeners();
+          }
         } catch (error) {
           if (error instanceof Error && error.message.includes('the client is offline')) {
             console.error("Please check your Firebase configuration.");
@@ -983,9 +992,42 @@ export default function App() {
                                 </td>
                                 <td className="py-2 px-3 text-right">
                                   {item.failed ? (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded px-1.5 py-0.5">
-                                      Failed
-                                    </span>
+                                    <div className="flex flex-col items-end justify-end gap-1 flex-wrap">
+                                      <div className="flex items-center gap-1.5 justify-end">
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 rounded px-1.5 py-0.5">
+                                          Failed
+                                        </span>
+                                        <button 
+                                          onClick={async () => {
+                                            await retrySyncItem(item.queueId);
+                                            const queue = await getSyncQueue();
+                                            setSyncHubItems(queue);
+                                            await updateSyncIndicators();
+                                          }}
+                                          className="text-[9px] px-1.5 py-0.5 bg-green-50 text-green-700 border border-green-200 rounded cursor-pointer hover:bg-green-100 font-bold"
+                                        >
+                                          Retry
+                                        </button>
+                                        <button 
+                                          onClick={async () => {
+                                            if(window.confirm('Cancel this sync item?')) {
+                                              await cancelSyncItem(item.queueId);
+                                              const queue = await getSyncQueue();
+                                              setSyncHubItems(queue);
+                                              await updateSyncIndicators();
+                                            }
+                                          }}
+                                          className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-700 border border-gray-300 rounded cursor-pointer hover:bg-gray-200 font-bold"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                      {item.lastError && (
+                                        <span className="text-[9px] text-red-500 max-w-[200px] truncate" title={`${item.errorCode || 'error'}: ${item.lastError}`}>
+                                          {item.errorCode === 'permission-denied' ? 'Access Denied (Rules)' : item.lastError}
+                                        </span>
+                                      )}
+                                    </div>
                                   ) : (
                                     <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5">
                                       Pending

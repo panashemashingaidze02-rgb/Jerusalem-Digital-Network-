@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { Member, MemberGroup, UserProfile, JdnLevel, Gender } from '../types';
 import { getMembers, saveMembers, addToSyncQueue, getUserProfiles, resolveBranchName, resolveLevelNameForCode, getAttendanceRecords } from '../lib/storage';
-import { UserPlus, Search, Filter, History, Calendar, Award, UserCheck, ShieldAlert, Sparkles, Download, FileSpreadsheet, FileText, Home, Users } from 'lucide-react';
+import { UserPlus, Search, Filter, History, Calendar, Award, UserCheck, ShieldAlert, Sparkles, Download, FileSpreadsheet, FileText, Home, Users, MoreVertical } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -65,6 +65,7 @@ export function Members({ currentUser }: MembersProps) {
   const [isPromoOpen, setIsPromoOpen] = useState(false);
   const [targetGroup, setTargetGroup] = useState<MemberGroup>(MemberGroup.MASOWANI);
   const [isLoading, setIsLoading] = useState(true);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const handleEditClick = (member: Member) => {
     setEditingMemberId(member.memberId);
@@ -818,51 +819,68 @@ export function Members({ currentUser }: MembersProps) {
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-right">
-                          <div className="flex justify-end gap-2 text-xs">
-                            {member.promotionHistory.length > 0 && (
-                              <button
-                                onClick={() => {
-                                  alert(`Promotion Trail:\n` + member.promotionHistory.map((h, i) => `${i+1}. From: ${h.fromGroup} → To: ${h.toGroup} (${h.date}) by Admin: ${h.promotedBy}`).join('\n'));
-                                }}
-                                className="p-1 px-2 border border-gray-200 rounded text-gray-600 hover:text-black flex items-center gap-1 hover:bg-gray-50 cursor-pointer"
-                              >
-                                <History className="h-3.5 w-3.5" /> Log
-                              </button>
-                            )}
+                          <div className="relative inline-block text-left">
+                            <button
+                              onClick={() => setOpenMenuId(openMenuId === member.memberId ? null : member.memberId)}
+                              className="p-1 px-2 rounded-full hover:bg-gray-100 text-gray-500 focus:outline-none cursor-pointer"
+                            >
+                              <MoreVertical className="h-5 w-5" />
+                            </button>
                             
-                            {/* Tabhera & Wellness Center Edit/Delete Actions */}
-                            {(currentUser.level === JdnLevel.TABHERA || currentUser.level === JdnLevel.WELLNESS_CENTER) && (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    handleEditClick(member);
-                                  }}
-                                  className="text-blue-600 font-semibold p-1 px-2.5 rounded transition-all flex items-center gap-1 border border-blue-200 bg-blue-50 hover:bg-blue-100 cursor-pointer"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteMember(member.memberId)}
-                                  className="text-red-600 font-semibold p-1 px-2.5 rounded transition-all flex items-center gap-1 border border-red-200 bg-red-50 hover:bg-red-100 cursor-pointer"
-                                >
-                                  Delete
-                                </button>
-                              </>
-                            )}
+                            {openMenuId === member.memberId && (
+                              <div className="origin-top-right absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50 overflow-hidden text-left">
+                                <div className="py-1">
+                                  {member.promotionHistory.length > 0 && (
+                                    <button
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        alert(`Promotion Trail:\n` + member.promotionHistory.map((h, i) => `${i+1}. From: ${h.fromGroup} → To: ${h.toGroup} (${h.date}) by Admin: ${h.promotedBy}`).join('\n'));
+                                      }}
+                                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer"
+                                    >
+                                      History Log
+                                    </button>
+                                  )}
+                                  
+                                  {(currentUser.level === JdnLevel.TABHERA || currentUser.level === JdnLevel.WELLNESS_CENTER) && (
+                                    <>
+                                      <button
+                                        onClick={() => {
+                                          setOpenMenuId(null);
+                                          handleEditClick(member);
+                                        }}
+                                        className="block w-full text-left px-4 py-2 text-sm text-blue-600 hover:bg-blue-50 cursor-pointer"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setOpenMenuId(null);
+                                          handleDeleteMember(member.memberId);
+                                        }}
+                                        className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 cursor-pointer"
+                                      >
+                                        Delete
+                                      </button>
+                                    </>
+                                  )}
 
-                            {/* Manual Promotion Trigger: Only District level or above is permitted manual logs as per instructions */}
-                            {currentUser.level !== JdnLevel.TABHERA && currentUser.level !== JdnLevel.NYIKA ? (
-                              <button
-                                onClick={() => {
-                                  setSelectedMember(member);
-                                  setTargetGroup(member.groupId);
-                                  setIsPromoOpen(true);
-                                }}
-                                className="bg-[#1D4ED8] hover:bg-[#1D4ED8]/90 text-white font-semibold p-1 px-2.5 rounded transition-all flex items-center gap-1 cursor-pointer"
-                              >
-                                <Award className="h-3.5 w-3.5" /> Promotion
-                              </button>
-                            ) : null}
+                                  {currentUser.level !== JdnLevel.TABHERA && currentUser.level !== JdnLevel.NYIKA && (
+                                    <button
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        setSelectedMember(member);
+                                        setTargetGroup(member.groupId);
+                                        setIsPromoOpen(true);
+                                      }}
+                                      className="block w-full text-left px-4 py-2 text-sm text-[#1D4ED8] hover:bg-blue-50 cursor-pointer"
+                                    >
+                                      Promote Member
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </td>
                       </tr>
