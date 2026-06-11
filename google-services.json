@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "92887234284",
+    "project_id": "gen-lang-client-0844782489",
+    "storage_bucket": "gen-lang-client-0844782489.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:92887234284:android:c4652246f89050f41097c9",
+        "android_client_info": {
+          "package_name": "jdn.wmtech.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "92887234284-rvnraltlpngb79bdhg6190krn9j9fjs2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApvoyD-wWeRpB-6DzzCss5WZ0qiL-jC0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "92887234284-rvnraltlpngb79bdhg6190krn9j9fjs2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

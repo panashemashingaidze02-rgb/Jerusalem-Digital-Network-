@@ -20,7 +20,9 @@ import {
   getLastSyncTime,
   getSettings,
   syncDownFromFirestore,
-  setupGlobalFirestoreListeners
+  setupGlobalFirestoreListeners,
+  getImpersonatorRoot,
+  setImpersonatorRoot
 } from './lib/storage';
 import { Auth, ForcedPasswordChange } from './components/Auth';
 import Verify from './components/Verify';
@@ -54,6 +56,7 @@ import {
   WifiOff,
   RefreshCw,
   Bell,
+  BellRing,
   Menu,
   X,
   Radio,
@@ -73,6 +76,17 @@ import {
 
 export default function App() {
   const [currentUser, setUser] = useState<UserProfile | null>(null);
+  const [impersonatorRoot, setImpersonatorRoot] = useState<UserProfile | null>(null);
+
+  const handleRevertImpersonation = async () => {
+    if (impersonatorRoot) {
+      await setCurrentUser(impersonatorRoot);
+      await setImpersonatorRoot(null);
+      toast.success('Restoring Super Admin core session...');
+      setTimeout(() => window.location.reload(), 1000);
+    }
+  };
+
   const [bgImgUrl, setBgImgUrl] = useState<string | null>(null);
   const [isDbLoaded, setIsDbLoaded] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
@@ -131,6 +145,9 @@ export default function App() {
         const user = await getCurrentUser();
         setUser(user);
 
+        const root = await getImpersonatorRoot();
+        setImpersonatorRoot(root);
+
         const maint = await getGlobalMaintenanceMode();
         setIsUnderMaintenance(maint);
 
@@ -154,6 +171,38 @@ export default function App() {
           if (user && getNetworkStatus()) {
              await syncDownFromFirestore();
              await setupGlobalFirestoreListeners();
+             
+             // Setup Firebase Cloud Messaging
+             try {
+               const { messaging, getToken, onMessage } = await import('./lib/firebase');
+               if (messaging) {
+                 const token = await getToken(messaging, { vapidKey: (import.meta as any).env.VITE_FIREBASE_VAPID_KEY });
+                 if (token) {
+                   console.log('Firebase Cloud Messaging token retrieved:', token);
+                   // You could update the user's profile with this token here or add to sync queue
+                 }
+                 
+                 onMessage(messaging, (payload) => {
+                   console.log('FCM Foreground Message:', payload);
+                   if (payload.notification) {
+                     toast.custom((t) => (
+                       <div className="bg-white p-4 rounded-xl shadow-lg border border-indigo-100 max-w-sm flex gap-3 pointer-events-auto">
+                         <div className="bg-indigo-100 text-indigo-700 p-2 rounded-lg shrink-0 flex items-center justify-center">
+                           <BellRing className="w-5 h-5" />
+                         </div>
+                         <div>
+                           <h4 className="font-bold text-sm text-gray-900">{payload.notification?.title}</h4>
+                           <p className="text-xs text-gray-600 mt-0.5">{payload.notification?.body}</p>
+                         </div>
+                         <button onClick={() => toast.dismiss(t)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-900">&times;</button>
+                       </div>
+                     ), { duration: 6000, position: 'top-right' });
+                   }
+                 });
+               }
+             } catch (fcmerr) {
+               console.warn('FCM integration skipped or failed:', fcmerr);
+             }
           }
         } catch (error) {
           if (error instanceof Error && error.message.includes('the client is offline')) {
@@ -188,6 +237,29 @@ export default function App() {
       updateSyncIndicators();
     };
 
+    const handleGlobalError = async (event: ErrorEvent | PromiseRejectionEvent) => {
+      try {
+        const errorMsg = 'error' in event ? event.error?.message || event.message : event.reason?.message || String(event.reason);
+        // exclude resize observer loop limit exceeded warning
+        if (errorMsg === 'ResizeObserver loop limit exceeded') return;
+        
+        const usr = await getCurrentUser();
+        const { addPlatformLog } = await import('./lib/storage');
+        await addPlatformLog({
+          actorId: usr ? usr.id : 'system_runtime',
+          actorName: usr ? usr.fullName : 'System Core',
+          actorLevel: usr ? usr.level : JdnLevel.SYSTEM,
+          action: 'APP_CRITICAL_ERROR',
+          details: `Uncaught Exception/Rejection: ${errorMsg}`,
+          category: 'system'
+        });
+      } catch (e) {
+        // ignore failure to log error
+      }
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleGlobalError);
     window.addEventListener('jdn_sync_queue_updated', refreshQueueStats);
     window.addEventListener('jdn_network_changed', refreshNetwork);
     window.addEventListener('jdn_notifications_updated', refreshNotifications);
@@ -197,6 +269,8 @@ export default function App() {
     window.addEventListener('jdn_settings_updated', loadSettingsBackground);
 
     return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleGlobalError);
       window.removeEventListener('jdn_sync_queue_updated', refreshQueueStats);
       window.removeEventListener('jdn_network_changed', refreshNetwork);
       window.removeEventListener('jdn_notifications_updated', refreshNotifications);
@@ -723,16 +797,33 @@ export default function App() {
   };
 
   return (
-    <div 
-      className="h-screen bg-[#F3F4F6] text-[#111827] flex flex-col md:flex-row font-sans overflow-hidden"
-      style={bgImgUrl ? {
-        backgroundImage: `url(${bgImgUrl})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat'
-      } : {}}
-    >
-      <Toaster position="top-right" />
+    <div className="h-screen flex flex-col font-sans overflow-hidden">
+      {/* Impersonator Warning Bar */}
+      {impersonatorRoot && currentUser && (
+        <div className="bg-amber-600 text-white font-bold text-xs py-2.5 px-4 flex justify-between items-center z-50 shadow-sm shrink-0 tracking-wide select-none">
+          <div className="flex items-center gap-2">
+            <span className="bg-amber-800 text-[9px] uppercase px-1.5 py-0.5 rounded tracking-widest font-black leading-none">Impersonation Mode</span>
+            <span>Active Session: Browsing as <span className="underline font-black">{currentUser.fullName}</span> ({currentUser.level} • {currentUser.branchName || 'Local Branch'})</span>
+          </div>
+          <button
+            onClick={handleRevertImpersonation}
+            className="bg-white hover:bg-neutral-50 text-amber-950 px-2.5 py-1 rounded transition-all font-mono font-black border border-white uppercase text-[10.5px] cursor-pointer"
+          >
+            Exit Impersonation
+          </button>
+        </div>
+      )}
+
+      <div 
+        className="flex-1 bg-[#F3F4F6] text-[#111827] flex flex-col md:flex-row overflow-hidden relative"
+        style={bgImgUrl ? {
+          backgroundImage: `url(${bgImgUrl})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat'
+        } : {}}
+      >
+        <Toaster position="top-right" />
       
       {/* 1. DESKTOP PERMANENT SIDEBAR LAYOUT (tablet & desktop wider screen sizes - rigid dimension constraints) */}
       <aside className="hidden md:flex flex-col w-64 min-w-[256px] max-w-[256px] bg-[#166534] text-white border-r border-[#166534]/10 shrink-0 select-none h-full overflow-y-auto">
@@ -1073,6 +1164,7 @@ export default function App() {
         </div>
       )}
 
+      </div>
     </div>
   );
 }

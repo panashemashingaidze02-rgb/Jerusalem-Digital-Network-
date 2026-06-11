@@ -20,7 +20,10 @@ import {
   getSettings,
   saveSettings,
   resolveBranchName,
-  forceBackfillToCloud
+  forceBackfillToCloud,
+  runStorageDiagnostics,
+  StorageDiagnosticResult,
+  addPlatformLog
 } from '../lib/storage';
 import { KeyRound, ShieldAlert, CheckCircle2, AlertTriangle, Key, Download, Trash, UserPlus, ToggleLeft, ToggleRight, Wifi, WifiOff, RefreshCw, FolderSearch, Users, Activity, Layers, ExternalLink, User, Image as ImageIcon, Coins } from 'lucide-react';
 import { JdnSettings } from '../types';
@@ -131,8 +134,13 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
   // Custom confirmation states to replace window.prompt/confirm (unsupported in iframe)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
+  const [restoreConfirmText, setRestoreConfirmText] = useState('');
   const [confirmSyncBulk, setConfirmSyncBulk] = useState(false);
   const [isSyncingBulk, setIsSyncingBulk] = useState(false);
+  
+  const [diagnosticResults, setDiagnosticResults] = useState<StorageDiagnosticResult[] | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
 
   // Helper: which levels can the current user create?
   const allowedChildLevels = hierarchyOrder.filter(lvl => {
@@ -658,9 +666,19 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
+      
+      await addPlatformLog({
+        actorId: currentUser.id,
+        actorName: currentUser.fullName,
+        actorLevel: currentUser.level,
+        action: 'DATA_EXPORT_JSON',
+        details: `Exported JSON Backup for filter: ${targetChurchFilter}`,
+        category: 'system'
+      });
+      
       toast.success(targetChurchFilter === 'ALL' ? 'Full System Backup Exported' : `Church Backup for "${targetChurchFilter}" Exported Successfully`);
-    } catch (e) {
-      toast.error('Failed to export backup');
+    } catch (e: any) {
+      toast.error(`Failed to export backup: ${e.message || 'Unknown error'}`);
     }
   };
 
@@ -692,7 +710,7 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
           }
 
           csvContent += `\n=== DATABASE COLLECTION: ${k.toUpperCase()} ===\n`;
-          if (data.length > 0) {
+          if (Array.isArray(data) && data.length > 0) {
             const headers = Object.keys(data[0]);
             csvContent += headers.join(",") + "\n";
             for (const item of data) {
@@ -719,6 +737,16 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      
+      await addPlatformLog({
+        actorId: currentUser.id,
+        actorName: currentUser.fullName,
+        actorLevel: currentUser.level,
+        action: 'DATA_EXPORT_EXCEL',
+        details: `Exported Excel Backup for filter: ${targetChurchFilter}`,
+        category: 'system'
+      });
+      
       toast.success(targetChurchFilter === 'ALL' ? 'System Spreadsheet Backup Downloaded' : `Spreadsheet Backup for "${targetChurchFilter}" Downloaded`);
     } catch (err: any) {
       toast.error('Failed to export Excel spreadsheet: ' + err.message);
@@ -740,6 +768,16 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
           for (const k in json) {
             await localforage.setItem(k, json[k]);
           }
+          
+          await addPlatformLog({
+            actorId: currentUser.id,
+            actorName: currentUser.fullName,
+            actorLevel: currentUser.level,
+            action: 'DATA_IMPORT_JSON',
+            details: 'Full System JSON Backup Restored.',
+            category: 'system'
+          });
+          
           toast.success('System Restored Successfully! Reloading module...');
           setTimeout(() => window.location.reload(), 1500);
         } else {
@@ -752,8 +790,8 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
           for (const k in json) {
             const importedList = json[k];
             if (Array.isArray(importedList)) {
-              const currentList = (await localforage.getItem(k)) || [];
-              let filteredImport = importedList;
+              const currentList = ((await localforage.getItem(k)) as any[]) || [];
+              let filteredImport: any[] = importedList;
               
               if (k.includes('user_profiles')) {
                 filteredImport = importedList.filter((u: any) => u.branchName === targetChurchFilter);
@@ -776,10 +814,20 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
             }
           }
           await loadSettingsData();
+          
+          await addPlatformLog({
+            actorId: currentUser.id,
+            actorName: currentUser.fullName,
+            actorLevel: currentUser.level,
+            action: 'DATA_IMPORT_JSON',
+            details: `Merged JSON Backup for filter: ${targetChurchFilter}`,
+            category: 'system'
+          });
+          
           toast.success(`Successfully imported and merged database backup for: ${targetChurchFilter}`);
         }
-      } catch (err) {
-        toast.error('Failed processing backup file');
+      } catch (err: any) {
+        toast.error(`Failed processing backup file: ${err.message || 'Unknown error'}`);
       }
     };
     reader.readAsText(file);
@@ -792,8 +840,20 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
       const localforage = (await import('localforage')).default;
       
       if (!isTargeted) {
+        const logs = await localforage.getItem('jdn_platform_logs');
         await localforage.clear();
+        if (logs) {
+          await localforage.setItem('jdn_platform_logs', logs);
+        }
         localStorage.clear();
+        await addPlatformLog({
+          actorId: currentUser.id,
+          actorName: currentUser.fullName,
+          actorLevel: currentUser.level,
+          action: 'SYSTEM_RESET_ALL',
+          details: 'Full system database and local storage reset.',
+          category: 'system'
+        });
         window.location.reload();
       } else {
         const targets = getSubordinateTabheraAndUserIds();
@@ -823,6 +883,16 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
           }
         }
         await loadSettingsData();
+        
+        await addPlatformLog({
+          actorId: currentUser.id,
+          actorName: currentUser.fullName,
+          actorLevel: currentUser.level,
+          action: 'SYSTEM_RESET_TARGETED',
+          details: `Cleared all database records for filter: ${targetChurchFilter}`,
+          category: 'system'
+        });
+        
         toast.success(`Successfully cleared all database records for: ${targetChurchFilter}`);
       }
     } catch (err: any) {
@@ -1815,10 +1885,41 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
                   ? 'Import a JSON backup to overwrite the entire system database.' 
                   : `Merge JSON records specifically for "${targetChurchFilter}" into database.`}
               </p>
-              <label className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center">
-                Select Backup file
-                <input type="file" accept=".json" className="hidden" onChange={handleImportBackup} />
-              </label>
+              {showRestoreConfirm ? (
+                <div className="w-full">
+                  <input
+                    type="text"
+                    placeholder={`Type '${targetChurchFilter === 'ALL' ? 'RESTORE ALL' : 'RESTORE ' + targetChurchFilter.toUpperCase()}'`}
+                    className="w-full p-2 text-xs border border-orange-300 rounded mb-2 font-mono uppercase bg-orange-50 placeholder:text-orange-300 placeholder:normal-case text-orange-900"
+                    value={restoreConfirmText}
+                    onChange={e => setRestoreConfirmText(e.target.value.toUpperCase())}
+                  />
+                  {restoreConfirmText === (targetChurchFilter === 'ALL' ? 'RESTORE ALL' : `RESTORE ${targetChurchFilter.toUpperCase()}`) ? (
+                    <label className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center block">
+                      Select Backup File (.json)
+                      <input type="file" accept=".json" className="hidden" onChange={async (e) => {
+                        setShowRestoreConfirm(false);
+                        setRestoreConfirmText('');
+                        await handleImportBackup(e);
+                      }} />
+                    </label>
+                  ) : (
+                    <button disabled className="w-full bg-orange-300 text-white font-bold py-2 rounded text-xs text-center cursor-not-allowed">
+                      Awaiting Confirmation...
+                    </button>
+                  )}
+                  <button onClick={() => { setShowRestoreConfirm(false); setRestoreConfirmText(''); }} className="w-full bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center mt-2">
+                    CANCEL
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setShowRestoreConfirm(true)}
+                  className="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center"
+                >
+                  Initiate Restore Process
+                </button>
+              )}
             </div>
             
             <div className="bg-red-50 p-4 border border-red-200 rounded-lg flex flex-col items-start gap-2">
@@ -1866,42 +1967,109 @@ export function Settings({ currentUser, onRefreshSession }: SettingsProps) {
               )}
             </div>
 
-            <div className="bg-blue-50 p-4 border border-blue-200 rounded-lg flex flex-col items-start gap-2">
-              <div className="font-bold text-xs uppercase text-blue-800 font-mono">Force Backfill to Cloud</div>
-              <p className="text-[10px] text-gray-600 flex-1">
-                If some records exist only locally, click this to upload all local records spanning your account scope to Firebase.
-              </p>
-              <button 
-                disabled={isSyncingBulk}
-                onClick={async () => {
-                  if (!confirmSyncBulk) {
-                    setConfirmSyncBulk(true);
-                    setTimeout(() => setConfirmSyncBulk(false), 5000);
-                    return;
-                  }
-                  try {
-                    setIsSyncingBulk(true);
-                    await forceBackfillToCloud();
-                    toast.success("Successfully bulk pushed all data to cloud database.");
-                    setConfirmSyncBulk(false);
-                  } catch (err: any) {
-                     toast.error("Failed to push to cloud. Ensure you have permissions. Error: " + err.message);
-                  } finally {
-                    setIsSyncingBulk(false);
-                  }
-                }}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1"
-              >
-                <Activity className={`h-3.5 w-3.5 ${isSyncingBulk ? 'animate-spin' : ''}`} /> 
-                {isSyncingBulk ? 'Syncing...' : (confirmSyncBulk ? 'Click again to confirm' : 'Bulk Sync to Remote')}
-              </button>
-            </div>
-
           </div>
         </div>
       )}
 
+      {/* Cloud Sync Operations (All Users) */}
+      <div className="bg-white rounded-xl border border-blue-200 overflow-hidden shadow-sm space-y-4 p-5 mt-6">
+        <div className="border-b border-blue-100 pb-3">
+          <h3 className="font-bold text-sm text-blue-900 flex items-center gap-1.5">
+            <Activity className="h-4.5 w-4.5 text-blue-600" /> Cloud Sync Options
+          </h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-blue-50 p-4 border border-blue-200 rounded-lg flex flex-col items-start gap-2">
+            <div className="font-bold text-xs uppercase text-blue-800 font-mono">Force Backfill to Cloud</div>
+            <p className="text-[10px] text-gray-600 flex-1">
+              If some records exist only locally, click this to upload all local records spanning your account scope to Firebase.
+            </p>
+            <button 
+              disabled={isSyncingBulk}
+              onClick={async () => {
+                if (!confirmSyncBulk) {
+                  setConfirmSyncBulk(true);
+                  setTimeout(() => setConfirmSyncBulk(false), 5000);
+                  return;
+                }
+                try {
+                  setIsSyncingBulk(true);
+                  await forceBackfillToCloud();
+                  toast.success("Successfully bulk pushed all data to cloud database.");
+                  setConfirmSyncBulk(false);
+                } catch (err: any) {
+                   toast.error("Failed to push to cloud: " + err.message);
+                } finally {
+                  setIsSyncingBulk(false);
+                }
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1"
+            >
+              <Activity className={`h-3.5 w-3.5 ${isSyncingBulk ? 'animate-spin' : ''}`} /> 
+              {isSyncingBulk ? 'Syncing...' : (confirmSyncBulk ? 'Click again to confirm' : 'Force Sync to Remote')}
+            </button>
+          </div>
 
+          <div className="bg-indigo-50 p-4 border border-indigo-200 rounded-lg flex flex-col items-start gap-2">
+            <div className="font-bold text-xs uppercase text-indigo-800 font-mono">Storage Diagnostics</div>
+            <p className="text-[10px] text-gray-600 flex-1">
+              Compare local and cloud data collections to identify discrepancies or unsynced records.
+            </p>
+            {diagnosticResults && (
+              <div className="w-full bg-white border border-indigo-100 rounded p-2 mb-2 text-[10px]">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-gray-100">
+                      <th className="font-medium pb-1">Collection</th>
+                      <th className="font-medium pb-1 text-right">Local</th>
+                      <th className="font-medium pb-1 text-right">Cloud</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diagnosticResults.map(res => (
+                      <tr key={res.collection} className={res.isStale ? "text-red-600 font-medium" : "text-gray-700"}>
+                        <td className="py-1">{res.collection}</td>
+                        <td className="py-1 text-right">{res.localCount}</td>
+                        <td className="py-1 text-right">{res.cloudCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {diagnosticResults.some(r => r.isStale) && (
+                   <p className="text-red-600 mt-2 font-bold italic border-t border-indigo-100 pt-2 text-center text-[9px]">
+                      Discrepancies found! Use 'Force Sync to Remote' to backfill missing data to the cloud.
+                   </p>
+                )}
+              </div>
+            )}
+            <button 
+              disabled={isDiagnosing}
+              onClick={async () => {
+                try {
+                  setIsDiagnosing(true);
+                  const results = await runStorageDiagnostics();
+                  setDiagnosticResults(results);
+                  
+                  const hasDiscrepancy = results.some(r => r.isStale);
+                  if (hasDiscrepancy) {
+                    toast.error("Discrepancies found between local and cloud data!");
+                  } else {
+                    toast.success("All collections are perfectly synced.");
+                  }
+                } catch (err: any) {
+                  toast.error("Failed to run diagnostics: " + err.message);
+                } finally {
+                  setIsDiagnosing(false);
+                }
+              }}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded text-xs transition-colors cursor-pointer text-center flex items-center justify-center gap-1"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isDiagnosing ? 'animate-spin' : ''}`} /> 
+              {isDiagnosing ? 'Scanning...' : 'Run Diagnostics'}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Path B Modal Account addition (Admin creates account) */}
       {isPathBOpen && (

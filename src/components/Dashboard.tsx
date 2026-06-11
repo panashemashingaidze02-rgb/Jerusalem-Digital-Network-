@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { UserProfile, JdnLevel, Member } from '../types';
-import { getMembers, getSyncQueue, getNetworkStatus, getUserProfiles, resolveBranchName, getGlobalMaintenanceMode, saveGlobalMaintenanceMode, isCodeInScope } from '../lib/storage';
-import { LayoutDashboard, Users, Clock, AlertCircle, FileSpreadsheet, CheckCircle2, ChevronRight, BookOpen, GraduationCap, Coins, Milestone, Sparkles, FileText, Server, HardDrive, ShieldAlert, Terminal, Activity, Wrench, Database, Sprout, Leaf, Flower2, GitFork, TreePine, Crown, ChevronUp, ChevronDown, CheckCircle } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+import { UserProfile, JdnLevel, Member, MemberGroup } from '../types';
+import { getMembers, getSyncQueue, getNetworkStatus, getUserProfiles, resolveBranchName, getGlobalMaintenanceMode, saveGlobalMaintenanceMode, isCodeInScope, addPlatformLog, getImpersonatorRoot, setImpersonatorRoot, setCurrentUser } from '../lib/storage';
+import { LayoutDashboard, Users, Clock, AlertCircle, FileSpreadsheet, CheckCircle2, ChevronRight, BookOpen, GraduationCap, Coins, Milestone, Sparkles, FileText, Server, HardDrive, ShieldAlert, Terminal, Activity, Wrench, Database, Sprout, Leaf, Flower2, GitFork, TreePine, Crown, ChevronUp, ChevronDown, CheckCircle, FolderSearch, Trash, RefreshCw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -37,6 +38,94 @@ export function Dashboard({ currentUser, onChangeTab }: DashboardProps) {
   // States and selectors for the organic church linkage tree (Jerusalem Trunk, System Roots)
   const [treeSearch, setTreeSearch] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  // Developer dashboard tools states
+  const [selectedCollection, setSelectedCollection] = useState<string>('jdn_members');
+  const [collectionCount, setCollectionCount] = useState<number>(0);
+  const [collectionSample, setCollectionSample] = useState<any[]>([]);
+  const [impersonationTarget, setImpersonationTarget] = useState<string>('');
+  const [impersonatedUser, setImpersonatedUser] = useState<UserProfile | null>(null);
+
+  const loadCollectionInfo = async (colName: string) => {
+    try {
+      const localforage = (await import('localforage')).default;
+      const data = await localforage.getItem<any[]>(colName);
+      if (Array.isArray(data)) {
+        setCollectionCount(data.length);
+        setCollectionSample(data.slice(0, 5));
+      } else if (data) {
+        setCollectionCount(1);
+        setCollectionSample([data]);
+      } else {
+        setCollectionCount(0);
+        setCollectionSample([]);
+      }
+    } catch (err) {
+      console.warn(err);
+    }
+  };
+
+  useEffect(() => {
+    const loadImpersonationStatus = async () => {
+      const activeRoot = await getImpersonatorRoot();
+      if (activeRoot) {
+        setImpersonatedUser(currentUser);
+        setImpersonationTarget(currentUser.id);
+      }
+    };
+    if (currentUser.level === JdnLevel.SYSTEM) {
+      loadImpersonationStatus();
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (currentUser.level === JdnLevel.SYSTEM) {
+      loadCollectionInfo(selectedCollection);
+    }
+  }, [selectedCollection, members, allUsers, currentUser]);
+
+  const handleForceSyncAll = async () => {
+    try {
+      const { processSyncQueue } = await import('../lib/storage');
+      await processSyncQueue();
+      toast.success('Pushed all synchronized records successfully.');
+      loadDashboardData();
+    } catch (e: any) {
+      toast.error('Sync failed: ' + e.message);
+    }
+  };
+
+
+
+  const handleImpersonate = async (targetId: string) => {
+    try {
+      if (!targetId) {
+        // Exit impersonated session
+        const root = await getImpersonatorRoot();
+        if (root) {
+          await setCurrentUser(root);
+          await setImpersonatorRoot(null);
+          toast.success('Exiting impersonation session...');
+          setTimeout(() => window.location.reload(), 1000);
+        }
+        return;
+      }
+
+      const targetUser = allUsers.find(u => u.id === targetId);
+      if (targetUser) {
+        // Prepare impersonator roots session
+        const currentRoot = await getImpersonatorRoot();
+        if (!currentRoot) {
+          await setImpersonatorRoot(currentUser);
+        }
+        await setCurrentUser(targetUser);
+        toast.success(`Successfully assumed context for: ${targetUser.fullName}`);
+        setTimeout(() => window.location.reload(), 1000);
+      }
+    } catch (err: any) {
+      toast.error('Impersonation failed: ' + err.message);
+    }
+  };
 
   useEffect(() => {
     loadDashboardData();
@@ -448,6 +537,9 @@ export function Dashboard({ currentUser, onChangeTab }: DashboardProps) {
                                 <span className="text-[9px] opacity-75 font-mono block tracking-wider truncate">
                                   <HighlightText text={node.levelCode.split('/').pop() || ''} search={treeSearch} />
                                 </span>
+                                <span className="text-[8px] opacity-70 font-semibold block tracking-wider text-gray-500">
+                                  {node.memberCount} MBRS
+                                </span>
                               </div>
                             </button>
                           );
@@ -641,118 +733,173 @@ export function Dashboard({ currentUser, onChangeTab }: DashboardProps) {
           </div>
         )}
 
-        {/* Console stats widgets */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center">
-            <div>
-              <span className="text-[10px] font-bold text-[#6B7280] uppercase tracking-wider block">Registered Staff Users</span>
-              <span className="text-xl font-bold text-gray-900 block mt-1 font-mono">{allUsers.length} Admins</span>
-            </div>
-            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
-              <Users className="h-5 w-5" />
-            </div>
-          </div>
+        {/* Real Development-Grade Super Admin Features Dashboard */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          {/* Column 1: Context & Node Impersonator */}
+          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4 flex flex-col justify-between">
+            <div className="space-y-4">
+              <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                <Crown className="h-4.5 w-4.5 text-[#166534]" /> Context & Node Impersonator
+              </h3>
+              <p className="text-xs text-gray-500 leading-normal">
+                Impersonate administrative roles of downstream nodes to preview distinct tab overlays, features, and permissions.
+              </p>
 
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center">
-            <div>
-              <span className="text-[10px] font-bold text-[#6B7280] uppercase tracking-wider block">Pending Sync Buffer</span>
-              <span className="text-xl font-bold text-gray-900 block mt-1 font-mono">{queueSize} Operations</span>
-            </div>
-            <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
-              <Clock className="h-5 w-5" />
-            </div>
-          </div>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider">Target Account</label>
+                  <select
+                    value={impersonationTarget}
+                    onChange={(e) => handleImpersonate(e.target.value)}
+                    className="w-full bg-gray-50 border border-gray-250 rounded-lg p-2.5 text-xs font-semibold text-gray-800 focus:outline-[#166534] cursor-pointer"
+                  >
+                    <option value="">-- No Active Impersonation --</option>
+                    {allUsers.filter(u => u.id !== currentUser.id).map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} ({u.level} - {u.branchName || 'No Branch'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center">
-            <div>
-              <span className="text-[10px] font-bold text-[#6B7280] uppercase tracking-wider block">Current Storage Consumption</span>
-              <span className="text-xl font-bold text-gray-900 block mt-1 font-mono">1.25 MB / 50 MB</span>
-            </div>
-            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
-              <HardDrive className="h-5 w-5" />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex justify-between items-center">
-            <div>
-              <span className="text-[10px] font-bold text-[#6B7280] uppercase tracking-wider block">Edge Core Health</span>
-              <span className="text-xl font-bold text-gray-900 block mt-1 font-mono">99.98% / Healthy</span>
-            </div>
-            <div className="p-3 bg-green-50 text-[#166534] rounded-lg">
-              <Server className="h-5 w-5" />
-            </div>
-          </div>
-        </div>
-
-        {/* Detailed System Status Panels */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-3">
-            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
-              <Activity className="h-4.5 w-4.5 text-[#166534]" /> System Metrics & Resource Bounds
-            </h3>
-            
-            <div className="space-y-4 text-xs font-sans">
-              <div className="space-y-1">
-                <div className="flex justify-between font-bold text-gray-700">
-                  <span>Browser Sandboxed LocalForage Storage Allocated (Safari PWA Buffer)</span>
-                  <span className="text-gray-900 font-mono">2.5% Used (1.25 MB logged)</span>
-                </div>
-                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                  <div className="bg-[#166534] h-full" style={{ width: '2.5%' }} />
-                </div>
-                <span className="block text-[10px] text-gray-400">Safely runs complete offline database replica without hitting device quota ceilings.</span>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between font-bold text-gray-700">
-                  <span>Simulated Web Worker Keep-Alive Process Thread</span>
-                  <span className="text-green-600 font-bold uppercase tracking-wider">Active</span>
-                </div>
-                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
-                  <div className="bg-green-500 h-full w-full" />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between font-bold text-gray-700">
-                  <span>Synchronization Queue Payload Error Threshold</span>
-                  <span className="text-slate-600 font-bold">0 / 5 Max Attempts</span>
-                </div>
-                <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden border border-gray-200">
-                  <div className="bg-amber-400 h-full w-0" />
-                </div>
+                {impersonatedUser ? (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Active Impersonation</span>
+                      <button
+                        onClick={() => handleImpersonate('')}
+                        className="text-[10px] text-amber-900 font-extrabold hover:underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    <div className="text-xs text-left">
+                      <p className="font-extrabold text-gray-900">{impersonatedUser.fullName}</p>
+                      <p className="text-gray-500 text-[10px] font-mono leading-tight mt-0.5">
+                        Tier Path: {impersonatedUser.levelCode}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-gray-50 border border-gray-150 rounded-xl text-center text-[10px] text-gray-500 font-medium">
+                    Operating under Root credentials. You have full system operations access.
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="pt-4 border-t border-gray-100 flex gap-3">
+            <div className="pt-3 border-t border-gray-100 text-[10.5px] text-gray-400 font-sans leading-relaxed">
+              Session impersonations write backup variables. Exit instantly inside the top orange notification banner.
+            </div>
+          </div>
+
+          {/* Column 2: Live System Operations & Diagnostics */}
+          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4 flex flex-col justify-between">
+            <div className="space-y-4">
+              <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+                <Terminal className="h-4.5 w-4.5 text-[#166534]" /> Live System Operations & Diagnostics
+              </h3>
+              <p className="text-xs text-gray-500 leading-normal">
+                Manage active systems, trigger manual records synchronization, and access the application audit trails.
+              </p>
+
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between items-center p-2.5 bg-gray-50 rounded-lg border border-gray-150">
+                  <span className="font-bold text-gray-700">Simulated PWA Offline Sync Queue</span>
+                  <span className="font-mono bg-emerald-100 text-emerald-800 font-black px-2 py-0.5 rounded text-[10px]">
+                    {queueSize} Operations Pending
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-2.5 bg-gray-50 rounded-lg border border-gray-150">
+                  <span className="font-bold text-gray-700">Audit Log Buffer Capacity</span>
+                  <span className="font-mono text-gray-600 font-semibold">Ready / Continuous Logs</span>
+                </div>
+                <div className="flex justify-between items-center p-2.5 bg-gray-50 rounded-lg border border-gray-150">
+                  <span className="font-bold text-gray-700">Super Admin Active Credentials</span>
+                  <span className="font-mono text-indigo-700 font-bold block truncate max-w-[150px]" title={currentUser.email}>
+                    {currentUser.email}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-gray-100 flex flex-col gap-2">
+              <button
+                onClick={handleForceSyncAll}
+                className="w-full bg-[#166534] hover:bg-[#155e2f] text-white font-bold text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+              >
+                <RefreshCw className="h-4 w-4 shrink-0" /> Manual Sync & Flush Record Queue ({queueSize})
+              </button>
               <button
                 onClick={() => onChangeTab('Audit Logs')}
-                className="bg-transparent hover:bg-gray-50 text-gray-700 font-bold text-xs px-4 py-2 border border-gray-200 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                className="w-full bg-white hover:bg-gray-50 border border-gray-250 text-gray-700 font-bold text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
               >
-                <Terminal className="h-4 w-4 text-[#166534]" /> View System Crash & Action Logs
-              </button>
-              <button
-                onClick={() => onChangeTab('Settings')}
-                className="bg-transparent hover:bg-gray-50 text-gray-700 font-bold text-xs px-4 py-2 border border-gray-200 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Wrench className="h-4 w-4 text-[#1D4ED8]" /> Configure Hierarchy Orders & Levels
+                <Terminal className="h-4 w-4 text-gray-500 shrink-0" /> View Application Audit Center
               </button>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
-              <Terminal className="h-4.5 w-4.5 text-gray-700" /> Active System Status Info
-            </h3>
-            <p className="text-xs text-[#6B7280] leading-relaxed font-semibold">
-              Super admin role acts as the systems manager block. Access is limited to system properties, logs, health telemetry, deactivation reassignment, and server components logic:
-            </p>
-            <ul className="space-y-2 text-xs font-semibold text-gray-700 pl-1 list-disc list-inside">
-              <li>Congregation databases are fully decoupled from Super Admin view</li>
-              <li>Sermon audio files and local media caches are functional</li>
-              <li>Real-time sync logs monitor client storage bounds</li>
-              <li>Maintenance togglers dynamically lock frontend requests</li>
-            </ul>
+        </div>
+
+        {/* Database Collection Sandbox Explorer Section */}
+        <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4 animate-fade-in">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-gray-150 pb-3">
+            <div>
+              <h3 className="font-bold text-sm text-gray-900 flex items-center gap-1.5">
+                <FolderSearch className="h-4.5 w-4.5 text-[#166534]" /> Interactive Database Collection Explorer
+              </h3>
+              <p className="text-[11px] text-gray-500 mt-0.5">
+                Inspect local persistent Forage databases, read active counts, and browse document schemas live.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <select
+                value={selectedCollection}
+                onChange={(e) => setSelectedCollection(e.target.value)}
+                className="bg-gray-50 border border-gray-250 rounded-lg px-2.5 py-1.5 text-xs font-bold text-gray-700 cursor-pointer"
+              >
+                <option value="jdn_members">Members (jdn_members)</option>
+                <option value="jdn_user_profiles">Users (jdn_user_profiles)</option>
+                <option value="jdn_contributions">Contributions (jdn_contributions)</option>
+                <option value="jdn_updates">Board Posts (jdn_updates)</option>
+                <option value="jdn_platform_logs">Platform Audit Logs (jdn_platform_logs)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-1 bg-gray-50 p-4 rounded-xl border border-gray-200 flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide block">Active Document Count</span>
+                <span className="text-3xl font-mono font-black text-gray-950 mt-1 block">{collectionCount}</span>
+                <span className="text-[10px] text-gray-500 block mt-2 leading-snug">
+                  Key path: <code className="bg-gray-200 px-1 py-0.5 rounded font-mono font-bold text-[#166534]">{selectedCollection}</code>
+                </span>
+              </div>
+              <button
+                onClick={() => loadCollectionInfo(selectedCollection)}
+                className="mt-4 w-full bg-white hover:bg-gray-150 border border-gray-200 text-gray-700 font-bold text-xs py-1.5 px-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="h-3 w-3" /> Refresh Count
+              </button>
+            </div>
+
+            <div className="lg:col-span-3 space-y-2">
+              <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide block">Document Schema Inspection (First 5 records)</span>
+              {collectionSample.length === 0 ? (
+                <div className="bg-gray-50 border border-dashed border-gray-200 rounded-xl p-8 text-center text-xs text-gray-550 italic">
+                  No records exist in the <code className="bg-gray-200 px-1 rounded">{selectedCollection}</code> database entity.
+                </div>
+              ) : (
+                <div className="bg-[#1e1e1e] rounded-xl p-4 overflow-x-auto border border-gray-805 text-left">
+                  <pre className="text-[10px] text-emerald-400 font-mono leading-normal whitespace-pre">
+                    {JSON.stringify(collectionSample, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

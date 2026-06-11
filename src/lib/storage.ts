@@ -1,4 +1,5 @@
 import localforage from 'localforage';
+import { toast } from 'react-hot-toast';
 import {
   UserProfile,
   LevelCode,
@@ -254,6 +255,18 @@ export async function setCurrentUser(user: UserProfile | null): Promise<void> {
   await localforage.setItem('jdn_current_user', user);
 }
 
+export async function getImpersonatorRoot(): Promise<UserProfile | null> {
+  return localforage.getItem<UserProfile | null>('jdn_impersonator_root');
+}
+
+export async function setImpersonatorRoot(user: UserProfile | null): Promise<void> {
+  if (user === null) {
+    await localforage.removeItem('jdn_impersonator_root');
+  } else {
+    await localforage.setItem('jdn_impersonator_root', user);
+  }
+}
+
 // User Profiles Fetch & Writes (purely local, offline-only)
 export async function getUserProfiles(): Promise<UserProfile[]> {
   const profiles = await localforage.getItem<UserProfile[]>('jdn_user_profiles');
@@ -360,6 +373,28 @@ export async function addToSyncQueue(
   queue.push(newItem);
   await saveSyncQueue(queue);
 
+  try {
+    const user = await getCurrentUser();
+    if (user) {
+      let category: 'auth' | 'payment' | 'member' | 'system' | 'contribution' | 'ungano' = 'system';
+      if (entityType === 'member') category = 'member';
+      if (entityType === 'contribution') category = 'contribution';
+      if (entityType.includes('ungano')) category = 'ungano';
+      if (entityType === 'profile') category = 'auth';
+      
+      await addPlatformLog({
+        actorId: user.id,
+        actorName: user.fullName || 'System User',
+        actorLevel: user.level,
+        action: `DATA_${operation.toUpperCase()}`,
+        details: `${entityType} record ${entityId} was ${operation}d.`,
+        category
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to log queue addition", e);
+  }
+
   // Auto trigger process if online simulation is active
   if (getNetworkStatus()) {
     setTimeout(() => processSyncQueue(), 500);
@@ -387,9 +422,6 @@ export async function processSyncQueue(): Promise<void> {
 
     item.attempts++;
     try {
-      // Small simulated latency for aesthetic effect
-      await new Promise(resolve => setTimeout(resolve, 800));
-
       if (item.entityType === 'profile' && item.operation === 'create') {
         const users = await getUserProfiles();
         const payloadUser = item.payload.profile as UserProfile;
@@ -532,6 +564,8 @@ export async function processSyncQueue(): Promise<void> {
       console.error(`Local sync retry failed: ${err.message}`);
       item.lastError = err.message;
       item.errorCode = err.code || 'unknown_error';
+      toast.error(`Sync failed for ${item.entityType}: ${err.message || err.code || 'Unknown Error'}`);
+      
       if (item.attempts >= maxAttempts) {
         item.failed = true;
       }
@@ -582,15 +616,17 @@ export async function setupGlobalFirestoreListeners(): Promise<void> {
         if (!snapshot.metadata.hasPendingWrites) {
              syncDownFromFirestore();
         }
-      }, (error) => {
+      }, (error: any) => {
         console.error(`Error listening to ${colName}:`, error);
+        toast.error(`Sync channel error (${colName}): ${error.message || 'Unknown'}`);
       });
     });
     
     globalListenersSetup = true;
     console.log("Global Firestore listeners attached.");
-  } catch(err) {
+  } catch(err: any) {
     console.error("Failed to setup global listeners:", err);
+    toast.error(`Failed to setup realtime listener: ${err.message || 'Unknown'}`);
   }
 }
 
@@ -616,8 +652,9 @@ export async function syncDownFromFirestore(): Promise<void> {
 
     console.log("Successfully backfilled data from cloud.");
     window.dispatchEvent(new Event('jdn_db_updated'));
-  } catch (err) {
+  } catch (err: any) {
     console.error("Failed to sync down cloud data", err);
+    toast.error(`Auto-Sync Down Error: ${err.message || 'Unknown'}`);
   }
 }
 
@@ -654,6 +691,73 @@ export async function forceBackfillToCloud(): Promise<void> {
     console.log('Successfully force-synced all local data up to cloud.');
   } catch (err) {
     console.error("Failed to force sync local data", err);
+    throw err;
+  }
+}
+
+export interface StorageDiagnosticResult {
+  collection: string;
+  localCount: number;
+  cloudCount: number;
+  isStale: boolean;
+}
+
+export async function runStorageDiagnostics(): Promise<StorageDiagnosticResult[]> {
+  try {
+    const { collection, getDocs } = await import('firebase/firestore');
+    const { db } = await import('./firebase');
+
+    const localMembers = await getMembers();
+    const cloudMembersSnap = await getDocs(collection(db, 'members'));
+    
+    const localProfiles = await getUserProfiles();
+    const cloudProfilesSnap = await getDocs(collection(db, 'user_profiles'));
+    
+    const localContributions = await getContributions();
+    const cloudContributionsSnap = await getDocs(collection(db, 'contributions'));
+    
+    const localSessions = await getAttendanceSessions();
+    const cloudSessionsSnap = await getDocs(collection(db, 'attendance_sessions'));
+    
+    const localRecords = await getAttendanceRecords();
+    const cloudRecordsSnap = await getDocs(collection(db, 'attendance_records'));
+
+    const diagnostics: StorageDiagnosticResult[] = [
+      {
+        collection: 'members',
+        localCount: localMembers.length,
+        cloudCount: cloudMembersSnap.size,
+        isStale: localMembers.length !== cloudMembersSnap.size
+      },
+      {
+        collection: 'user_profiles',
+        localCount: localProfiles.length,
+        cloudCount: cloudProfilesSnap.size,
+        isStale: localProfiles.length !== cloudProfilesSnap.size
+      },
+      {
+        collection: 'contributions',
+        localCount: localContributions.length,
+        cloudCount: cloudContributionsSnap.size,
+        isStale: localContributions.length !== cloudContributionsSnap.size
+      },
+      {
+        collection: 'attendance_sessions',
+        localCount: localSessions.length,
+        cloudCount: cloudSessionsSnap.size,
+        isStale: localSessions.length !== cloudSessionsSnap.size
+      },
+      {
+        collection: 'attendance_records',
+        localCount: localRecords.length,
+        cloudCount: cloudRecordsSnap.size,
+        isStale: localRecords.length !== cloudRecordsSnap.size
+      }
+    ];
+
+    return diagnostics;
+  } catch (err) {
+    console.error("Failed to run diagnostics", err);
     throw err;
   }
 }
@@ -1178,7 +1282,11 @@ export async function savePrayerRequests(items: any[]): Promise<void> {
 
 // Full System Wipe (for backup restoration / reset)
 export async function clearAllSystemData(): Promise<void> {
+  const logs = await localforage.getItem('jdn_platform_logs');
   await localforage.clear();
+  if (logs) {
+    await localforage.setItem('jdn_platform_logs', logs);
+  }
 }
 
 // Real-time Storage Usage bytes estimator (replaces mock tracking)
